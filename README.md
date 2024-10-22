@@ -27,4 +27,4 @@ where
 - ``n_mpi`` is the number of mpi processes to run  ``SHALLOW_WATER_MAIN``
 - ``exp_variant`` is one of (empty), "corner", "fcorner"
 
-The NCAR graphics python package pyngl.ucar.edu is required to draw plots.
+The NCAR graphics python package https://pyngl.ucar.edu is required to draw plots.
