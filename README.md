@@ -28,3 +28,12 @@ where
 - ``exp_variant`` is one of (empty), "corner", "fcorner"
 
 The NCAR graphics python package https://pyngl.ucar.edu is required to draw plots.
+
+### Solid rotation
+
+```bash
+mkdir gauss_linear; cd gauss_linear
+path_to_model_repo/src/models/shallow_water/test/scripts/article_experiments/run_ts2_linear.sh path_to_exe n_mpi
+#visualization
+python3 path_to_model_repo/src/models/shallow_water/test/scripts/article_experiments/plot_gauss_linear.py .
+```
