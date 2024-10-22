@@ -1,0 +1,310 @@
+# 1 "/home/vova/src/ParCS_NH/src/stuff/config/geosci_config/arithmetic_parser/arithmetic_parser_mod.f90"
+module arithmetic_parser_mod
+
+use arithmetic_parser_tools_mod
+
+implicit none
+
+! type, abstract :: operation_t
+!     contains
+!         procedure(evaluate_i), deferred :: evaluate
+! end type
+!
+! type, abstract, extends(operation_t) :: binary_operation_t
+!     class(*), allocatable :: arg1, arg2
+!     contains
+!         procedure :: evaluate => evaluate_binary
+!         procedure(evaluate_binary_r8), deferred, nopass :: evaluate_r8
+! end type
+
+! abstract interface
+!     subroutine evaluate_i(this,res,err_msg)
+!         import operation_t
+!         class(operation_t),            intent(inout) :: this
+!         real(kind=8),                  intent(out)   :: res
+!         character(len=:), allocatable, intent(out)   :: err_msg
+!     end subroutine
+!     real(kind=8) function evaluate_binary_r8(arg1, arg2) result(res)
+!         real(kind=8), intent(in) :: arg1, arg2
+!     end function
+! end interface
+
+! type, extends(binary_operation_t) :: add_operation_t
+!     contains
+!         procedure, nopass :: evaluate_r8 => add_r8
+! end type
+!
+! type, extends(binary_operation_t) :: mul_operation_t
+!     contains
+!         procedure, nopass :: evaluate_r8 => mul_r8
+! end type
+
+contains
+
+subroutine evaluate_expression(str)
+    character(len=*), intent(in) :: str
+
+    integer(kind=4) :: pos, pos1
+    integer(kind=4) :: mode ! 1 - unary op or value expected
+! 2 - binary op expected
+    logical :: success
+    class(value_t),     allocatable :: value
+    class(operation_t), allocatable :: oper, oper1
+
+    type(value_stack_t) :: values
+    type(operation_stack_t) :: operations
+
+    pos  = 1
+    mode = 1
+    do while (pos <= len(str))
+
+        if(index(" "//char(9)//new_line('c'),str(pos:pos)) /=0) then
+            pos = pos+1
+            cycle
+        end if
+
+        if(mode == 1) then
+            call try_to_get_value(value,success,pos1,str(pos:))
+            if(success) then
+                pos = pos+pos1
+                mode = 2
+                call values%push(value)
+                cycle
+            end if
+
+! call try_to_get_unary_op(success,pos1,str(pos:))
+! if(success) then
+!     pos = pos+pos1
+!     mode = 1
+!     cycle
+! end if
+        else
+            call try_to_get_binary_op(oper,success,pos1,str(pos:))
+            if(success) then
+                pos = pos+pos1
+                mode = 1
+                do while(.not. operations%is_empty())
+                    if(operations%top_priority()<oper%priority()) exit
+                    oper1 = operations%pop_operation()
+                    value = oper1%apply(values)
+                    call values%push(value)
+                end do
+                call operations%push(oper)
+                cycle
+            end if
+        end if
+
+        print *, "Error, unexpected syntax: "// str(pos:)
+        return
+    end do
+
+    do while(.not. operations%is_empty())
+        oper1 = operations%pop_operation()
+        value = oper1%apply(values)
+        call values%push(value)
+    end do
+
+    value = values%pop_value()
+
+    select type(value)
+    type is (int_value_t)
+        print *, "res = ", value%val
+    type is (real_value_t)
+        print *, "res = ", value%val
+    class default
+        print *, "wtf"
+    end select
+end subroutine
+
+subroutine try_to_get_value(val, success,end_pos,str)
+
+    class(value_t), allocatable, intent(out) :: val
+    logical,                     intent(out) :: success
+    integer(kind=4),             intent(out) :: end_pos
+    character(len=*),            intent(in)  :: str
+
+    integer(kind=4) :: ival
+    real(kind=8)    :: rval
+
+    call try_to_get_float(rval, success, end_pos, str)
+    if(success) then
+        val = real_value_t(rval)
+        return
+    end if
+
+    call try_to_get_int(ival, success, end_pos, str)
+    if(success) then
+        val = int_value_t(ival)
+        return
+    end if
+
+end subroutine
+
+subroutine try_to_get_float(p, success,end_pos,str)
+
+    real(kind=8),     intent(out) :: p
+    logical,          intent(out) :: success
+    integer(kind=4),  intent(out) :: end_pos
+    character(len=*), intent(in)  :: str
+
+    integer(kind=4) :: i, n_dots, n_exp, n_digits, exp_pos
+
+    success = .false.
+    n_exp = 0
+    n_dots = 0
+    n_digits = 0
+    exp_pos = -123 !undef
+
+    do i = 1, len(str)
+        if(index("0123456789",str(i:i)) /=0) then
+            n_digits = n_digits+1
+        else if(i/=1.and.index("eEdD",str(i:i)) /= 0 .and. n_exp == 0) then
+            n_exp = 1
+            exp_pos = i
+        else if(index("+-",str(i:i)) /= 0 .and. exp_pos == i-1) then
+!continue
+        else if(str(i:i)=="." .and. n_exp == 0 .and. n_dots == 0) then
+            n_dots = 1
+        else
+            exit
+        end if
+    end do
+
+    if(n_digits > 0 .and. (n_dots == 1 .or. n_exp == 1)) then
+        if(index(".0123456789",str(i-1:i-1)) == 0) return
+        success = .true.
+        end_pos = min(i-1,len(str))
+        read(str(1:end_pos),*) p
+! print *, "real value ", str(1:end_pos), " ", p
+    end if
+
+end subroutine
+
+subroutine try_to_get_int(ival, success,end_pos,str)
+
+    integer(kind=4),  intent(out) :: ival
+    logical,          intent(out) :: success
+    integer(kind=4),  intent(out) :: end_pos
+    character(len=*), intent(in)  :: str
+
+    integer(kind=4) :: i, n_digits
+
+    success = .false.
+    n_digits = 0
+
+    do i = 1, len(str)
+        if(index("0123456789",str(i:i)) /=0) then
+            n_digits = n_digits+1
+        else
+            exit
+        end if
+    end do
+
+    if(n_digits > 0) then
+        success = .true.
+        end_pos = min(i-1,len(str))
+        read(str(1:end_pos),*) ival
+! print *, "int value ", str(1:end_pos), " ", ival
+    end if
+
+end subroutine
+
+subroutine try_to_get_unary_op(success,end_pos,str)
+
+    logical,          intent(out) :: success
+    integer(kind=4),  intent(out) :: end_pos
+    character(len=*), intent(in)  :: str
+
+    if(str(1:1) == "-") then
+        print *, "unary minus"
+        end_pos = 1
+    else if(str(1:1) == "+") then
+        print *, "unary plus"
+        end_pos = 1
+    else
+        success = .false.
+        return
+    end if
+
+    success = .true.
+    return
+
+end subroutine
+
+subroutine try_to_get_binary_op(oper,success,end_pos,str)
+
+    class(operation_t), allocatable, intent(out) :: oper
+    logical,          intent(out) :: success
+    integer(kind=4),  intent(out) :: end_pos
+    character(len=*), intent(in)  :: str
+
+    if(str(1:1) == "-") then
+        oper = subs_t()
+        end_pos = 1
+    else if(str(1:1) == "+") then
+        oper = add_t()
+        end_pos = 1
+    else if(str(1:min(2,len(str))) == "**") then
+        oper = pow_t()
+        end_pos = 2
+    else if(str(1:1) == "^") then
+        oper = pow_t()
+        end_pos = 1
+    else if(str(1:1) == "*") then
+        oper = mul_t()
+        end_pos = 1
+    else
+        success = .false.
+        return
+    end if
+
+    success = .true.
+    return
+
+end subroutine
+
+! subroutine evaluate_binary(this,res,err_msg)
+!     class(binary_operation_t),     intent(inout) :: this
+!     real(kind=8),                  intent(out)   :: res
+!     character(len=:), allocatable, intent(out) :: err_msg
+!
+!     real(kind=8) :: arg1_r8, arg2_r8
+!
+!     select type(arg1=>this%arg1)
+!     type is (real(kind=8))
+!         arg1_r8 = arg1
+!     class is(operation_t)
+!         call arg1%evaluate(arg1_r8,err_msg)
+!         if(allocated(err_msg)) return
+!     class default
+!         err_msg = "type error arg1"
+!         return
+!     end select
+!
+!     select type(arg2=>this%arg2)
+!     type is (real(kind=8))
+!         arg2_r8 = arg2
+!     class is(operation_t)
+!         call arg2%evaluate(arg2_r8,err_msg)
+!         if(allocated(err_msg)) return
+!     class default
+!         err_msg = "type error arg2"
+!         return
+!     end select
+!
+!     res = this%evaluate_r8(arg1_r8, arg2_r8)
+! end subroutine
+!
+! real(kind=8) function add_r8(arg1, arg2) result(res)
+!     real(kind=8), intent(in) :: arg1, arg2
+!
+!     res = arg1+arg2
+! end function
+!
+! real(kind=8) function mul_r8(arg1, arg2) result(res)
+!     real(kind=8), intent(in) :: arg1, arg2
+!
+!     res = arg1*arg2
+! end function
+
+end module
